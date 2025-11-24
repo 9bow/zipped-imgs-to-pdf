@@ -296,7 +296,9 @@ def main():
     # Check if Pillow is available
     if not PILLOW_AVAILABLE:
         print("Error: Pillow library is required. Install it with: pip install Pillow")
+        print("Error: Pillow library is required. Install it with: pip install Pillow")
         sys.exit(1)
+        return
 
     parser = argparse.ArgumentParser(
         description='Convert ZIP files containing images to PDF files.',
@@ -376,7 +378,9 @@ Examples:
                 output_dir.mkdir(parents=True, exist_ok=True)
             except Exception as e:
                 print(f"Error creating output directory: {e}")
-                sys.exit(1)
+                print(f"Error creating output directory: {e}")
+        sys.exit(1)
+        return
 
     # Print configuration
     print("Configuration:")
@@ -414,7 +418,10 @@ Examples:
 
     if not zip_files_to_process:
         print("Error: No ZIP files to process")
+    if not zip_files_to_process:
+        print("Error: No ZIP files to process")
         sys.exit(1)
+        return
 
     print(f"\nProcessing {len(zip_files_to_process)} ZIP file(s)...\n")
 

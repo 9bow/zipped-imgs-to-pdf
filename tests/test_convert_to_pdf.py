@@ -381,12 +381,16 @@ class TestConvertToPDFResolution:
         output_pdf = temp_dir / "output.pdf"
 
         # Mock the Image.save to check resolution parameter
-        with mock.patch.object(Image.Image, 'save', wraps=Image.Image.save) as mock_save:
+        with mock.patch.object(Image.Image, 'save') as mock_save:
             result = convert_images_to_pdf([img_path], output_pdf)
 
             assert result is True
             # Verify save was called with resolution parameter
-            assert any('resolution' in str(call) for call in mock_save.call_args_list)
+            # The first call to save is the one that matters
+            save_call = mock_save.call_args
+            assert save_call is not None
+            assert 'resolution' in save_call.kwargs
+            assert save_call.kwargs['resolution'] == 100.0
 
 
 @pytest.mark.skipif(not PILLOW_AVAILABLE, reason="Pillow not available")

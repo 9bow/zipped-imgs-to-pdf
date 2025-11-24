@@ -22,7 +22,15 @@ def is_image_file(filename: str) -> bool:
     Returns:
         True if the file is an image, False otherwise
     """
-    return Path(filename).suffix.lower() in IMAGE_EXTENSIONS
+    path = Path(filename)
+    suffix = path.suffix.lower()
+
+    # Handle case where filename is just an extension (e.g. ".jpg")
+    # Path('.jpg').suffix is empty, but name is '.jpg'
+    if not suffix and filename.startswith('.'):
+        return filename.lower() in IMAGE_EXTENSIONS
+
+    return suffix in IMAGE_EXTENSIONS
 
 
 def natural_sort_key(text: str) -> List[Union[int, str]]:

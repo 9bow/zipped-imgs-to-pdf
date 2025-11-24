@@ -9,9 +9,32 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('jszip');
 vi.mock('jspdf');
 
+// Mock localStorage
+const localStorageMock = (() => {
+  let store = {};
+  return {
+    getItem: vi.fn(key => store[key] || null),
+    setItem: vi.fn((key, value) => { store[key] = value.toString(); }),
+    removeItem: vi.fn(key => { delete store[key]; }),
+    clear: vi.fn(() => { store = {}; }),
+    mockClear: () => {
+      store = {};
+    }
+  };
+})();
+vi.stubGlobal('localStorage', localStorageMock);
+
 import JSZip from 'jszip';
 
-// Import mocked sorting logic
+// Mock sorting logic
+vi.mock('../shared/sorting-logic.js', () => ({
+  sortImages: vi.fn((files) => files),
+  isImageFile: vi.fn((filename) => {
+    const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase();
+    return ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'].includes(ext);
+  })
+}));
+
 import { sortImages, isImageFile } from '../shared/sorting-logic.js';
 
 describe('Complete ZIP to PDF Workflow', () => {
@@ -201,7 +224,7 @@ describe('Settings Persistence Workflow', () => {
 
     // Simulate page reload
     const savedData = localStorage.getItem('zipToPdfSettings');
-    const restored Settings = JSON.parse(savedData);
+    const restoredSettings = JSON.parse(savedData);
 
     expect(restoredSettings).toEqual(initialSettings);
   });

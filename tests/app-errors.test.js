@@ -486,11 +486,13 @@ describe('URL Object Errors', () => {
   });
 
   it('should handle createObjectURL failures', () => {
-    global.URL.createObjectURL.mockImplementation(() => {
+    const createObjectURLSpy = vi.spyOn(global.URL, 'createObjectURL').mockImplementation(() => {
       throw new Error('Failed to create object URL');
     });
 
     expect(() => URL.createObjectURL(new Blob())).toThrow('Failed to create object URL');
+
+    createObjectURLSpy.mockRestore();
   });
 
   it('should handle revokeObjectURL on invalid URLs', () => {
@@ -512,6 +514,8 @@ describe('URL Object Errors', () => {
     try {
       // Simulate error during processing
       throw new Error('Processing failed');
+    } catch (e) {
+      // Ignore expected error
     } finally {
       // URLs should still be cleaned up
       images.forEach(img => URL.revokeObjectURL(img.url));
@@ -522,28 +526,28 @@ describe('URL Object Errors', () => {
 });
 
 describe('Special Characters and Edge Cases', () => {
-  it('should handle filenames with multiple dots', () => {
-    const { isImageFile } = require('../shared/sorting-logic.js');
+  it('should handle filenames with multiple dots', async () => {
+    const { isImageFile } = await import('../shared/sorting-logic.js');
 
     expect(isImageFile('file.name.with.many.dots.jpg')).toBe(true);
     expect(isImageFile('file.name.with.many.dots.txt')).toBe(false);
   });
 
-  it('should handle empty filenames', () => {
-    const { isImageFile } = require('../shared/sorting-logic.js');
+  it('should handle empty filenames', async () => {
+    const { isImageFile } = await import('../shared/sorting-logic.js');
 
     expect(isImageFile('')).toBe(false);
   });
 
-  it('should handle filenames without extensions', () => {
-    const { isImageFile } = require('../shared/sorting-logic.js');
+  it('should handle filenames without extensions', async () => {
+    const { isImageFile } = await import('../shared/sorting-logic.js');
 
     expect(isImageFile('filename_without_extension')).toBe(false);
   });
 
-  it('should handle very long filenames', () => {
+  it('should handle very long filenames', async () => {
     const longFilename = 'a'.repeat(255) + '.jpg';
-    const { isImageFile } = require('../shared/sorting-logic.js');
+    const { isImageFile } = await import('../shared/sorting-logic.js');
 
     expect(isImageFile(longFilename)).toBe(true);
   });
