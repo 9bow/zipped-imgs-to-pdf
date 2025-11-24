@@ -22,7 +22,6 @@ const MAX_FILES_IN_ZIP = 10000; // Maximum number of files to extract
 // Image processing constants
 const MAX_IMAGE_DIMENSION = 2000; // Maximum dimension in pixels
 const IMAGE_SCALE_FACTOR = 4; // Scale factor for PDF conversion
-const WHITE_BACKGROUND = [255, 255, 255]; // RGB white for image backgrounds
 
 // State management
 const state = {
@@ -516,6 +515,11 @@ async function convertAllZipsIndividually() {
                 });
 
                 successCount++;
+
+                // Add small delay to ensure browser processes each download separately
+                // This prevents filename conflicts when multiple files are downloaded rapidly
+                await new Promise(resolve => setTimeout(resolve, 100));
+
                 // Remove the processed file
                 removeFile(fileId);
 
@@ -560,19 +564,35 @@ async function convertAllZipsToSinglePDF() {
     try {
         showProgressModal(true);
 
-        // Extract images from all ZIPs
+        // Sort ZIP files by their filenames first (using natural sort settings)
+        const zipFilenames = zipFiles.map(({ fileData }) => fileData.file.name);
+        const sortedZipFilenames = sortImages(
+            zipFilenames,
+            state.settings.useNaturalSort,
+            state.settings.priorityChars
+        );
+
+        // Reorder zipFiles array based on sorted filenames
+        const sortedZipFiles = sortedZipFilenames.map(filename =>
+            zipFiles.find(({ fileData }) => fileData.file.name === filename)
+        );
+
+        // Extract images from all ZIPs in sorted order
+        // Each ZIP's images are already sorted internally by extractImagesFromZip
         const allImages = [];
-        for (let i = 0; i < zipFiles.length; i++) {
-            const { fileData } = zipFiles[i];
+        for (let i = 0; i < sortedZipFiles.length; i++) {
+            const { fileData } = sortedZipFiles[i];
 
             updateProgress({
                 current: i + 1,
-                total: zipFiles.length,
+                total: sortedZipFiles.length,
                 stage: 'extracting'
             });
 
             const images = await extractImagesFromZip(fileData.file, () => { });
 
+            // Images from extractImagesFromZip are already sorted
+            // Add them in order to maintain ZIP file sequence
             if (images.length > 0) {
                 allImages.push(...images);
             }
@@ -581,33 +601,19 @@ async function convertAllZipsToSinglePDF() {
         if (allImages.length === 0) {
             throw new Error('No images found in any ZIP file.');
         }
-
-        // Sort all images together using current settings
-        const filenames = allImages.map(img => img.filename);
-        const sortedFilenames = sortImages(
-            filenames,
-            state.settings.useNaturalSort,
-            state.settings.priorityChars
-        );
-
-        // Reorder images based on sorted filenames
-        const sortedImages = sortedFilenames.map(filename =>
-            allImages.find(img => img.filename === filename)
-        );
-
         // Convert to PDF
         const outputFilename = 'merged_archives.pdf';
-        await convertImagesToPDF(sortedImages, outputFilename, updateProgress);
+        await convertImagesToPDF(allImages, outputFilename, updateProgress);
 
         showProgressModal(false);
         showNotification(
             'success',
             'Merge Complete',
-            `Successfully merged ${zipFiles.length} ZIP file(s) into one PDF!\nFile: ${outputFilename}\nTotal pages: ${allImages.length}`
+            `Successfully merged ${zipFiles.length} ZIP file(s) into one PDF!\nFile: ${outputFilename} \nTotal pages: ${allImages.length} `
         );
 
         // Clear all ZIP files after successful conversion
-        zipFiles.forEach(({ fileId }) => removeFile(fileId));
+        sortedZipFiles.forEach(({ fileId }) => removeFile(fileId));
 
     } catch (error) {
         showProgressModal(false);
@@ -681,7 +687,7 @@ function renderFileList() {
                 Convert Each to PDF
             </button>
             <button class="btn btn-primary btn-convert-all" onclick="convertAllZipsToSinglePDF()">
-                Merge All to PDF
+                Merge All to Single PDF
             </button>
         `;
     }
@@ -748,7 +754,7 @@ function handleFiles(files) {
             showNotification(
                 'warning',
                 'File Size Exceeded',
-                `${file.name} is too large.\nMaximum: ${formatFileSize(MAX_FILE_SIZE)}\nCurrent: ${formatFileSize(file.size)}`
+                `${file.name} is too large.\nMaximum: ${formatFileSize(MAX_FILE_SIZE)} \nCurrent: ${formatFileSize(file.size)} `
             );
             continue;
         }
