@@ -15,7 +15,7 @@
 const SETTINGS_STORAGE_KEY = 'zipToPdfSettings';
 
 // Security limits - should match shared/constants.py
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB in bytes
+const MAX_FILE_SIZE = 200 * 1024 * 1024; // 200MB in bytes
 const MAX_EXTRACTED_SIZE = 500 * 1024 * 1024; // 500MB (ZIP bomb protection)
 const MAX_FILES_IN_ZIP = 10000; // Maximum number of files to extract
 
