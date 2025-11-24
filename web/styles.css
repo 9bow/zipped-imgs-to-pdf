@@ -208,6 +208,40 @@ main {
     outline-offset: 2px;
 }
 
+.convert-all-section {
+    margin-bottom: 1.5rem;
+    text-align: center;
+}
+
+.btn-convert-all {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 0.75rem 2rem;
+    border-radius: 0.5rem;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-weight: 600;
+}
+
+.btn-convert-all:hover {
+    background-color: var(--primary-hover);
+}
+
+.btn-convert-all:focus,
+.btn-convert-all:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+.button-group {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
 .file-list {
     margin-bottom: 2rem;
 }

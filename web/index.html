@@ -12,7 +12,7 @@
     <div class="container">
         <header>
             <h1>Zipped Images to PDF Converter</h1>
-            <p class="subtitle">Convert zipped image files to PDF (100% Client-Side)</p>
+            <p class="subtitle">Convert images or ZIP files to PDF (100% Client-Side)</p>
         </header>
 
         <main>
@@ -45,10 +45,16 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
-                    <p class="drop-text">Drag and drop ZIP files here or click to select</p>
-                    <input type="file" id="fileInput" accept=".zip" multiple hidden>
+                    <p class="drop-text">Drag and drop ZIP files or images here or click to select</p>
+                    <input type="file" id="fileInput" accept=".zip,.jpg,.jpeg,.png,.gif,.webp" multiple hidden>
                     <button class="btn-select" onclick="document.getElementById('fileInput').click()">Select
                         Files</button>
+                </div>
+            </div>
+
+            <div class="convert-all-section" id="convertAllSection" style="display: none;">
+                <div class="button-group" id="convertButtonGroup">
+                    <!-- Buttons will be dynamically inserted here -->
                 </div>
             </div>
 
@@ -57,12 +63,14 @@
             <div class="info-section">
                 <h2>Features</h2>
                 <ul>
-                    <li>Automatically extracts images from ZIP files and converts them into a single PDF</li>
+                    <li>Convert ZIP files containing images to PDF</li>
+                    <li>Convert multiple image files to a single PDF</li>
                     <li>Configurable Natural Sort - sorts numbers in filenames naturally (e.g., page_1, page_2, page_10)
                     </li>
                     <li>Priority character settings - place images starting with specific characters first (default:
-                        <code>!</code>)</li>
-                    <li>Supports various image formats (JPG, PNG, GIF, BMP, WebP)</li>
+                        <code>!</code>)
+                    </li>
+                    <li>Supports various image formats (JPG, JPEG, PNG, GIF, WebP)</li>
                     <li>100% client-side processing - files are never uploaded to a server</li>
                 </ul>
             </div>

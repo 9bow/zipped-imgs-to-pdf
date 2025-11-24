@@ -26,13 +26,15 @@ const WHITE_BACKGROUND = [255, 255, 255]; // RGB white for image backgrounds
 
 // State management
 const state = {
-    files: new Map(), // Map<fileId, {file, status, images}>
+    files: new Map(), // Map<fileId, {file, type: 'zip'|'image', status}>
+    imageFiles: [], // Array of {fileId, file} for batch image conversion
     currentFileId: 0,
     settings: {
         useNaturalSort: true,
         priorityChars: DEFAULT_PRIORITY_CHARS
     }
 };
+
 /**
  * Format file size in human-readable format
  */
@@ -393,14 +395,242 @@ async function convertZipToPDF(fileId) {
 }
 
 /**
+ * Convert all image files to a single PDF
+ */
+async function convertAllToPDF() {
+    if (state.imageFiles.length === 0) {
+        showNotification('warning', 'No Images', 'No image files to convert.');
+        return;
+    }
+
+    try {
+        showProgressModal(true);
+
+        // Load all images
+        updateProgress({ current: 0, total: state.imageFiles.length, stage: 'extracting' });
+
+        const images = [];
+        for (let i = 0; i < state.imageFiles.length; i++) {
+            const { file } = state.imageFiles[i];
+            const blob = file;
+            const url = URL.createObjectURL(blob);
+
+            images.push({
+                filename: file.name,
+                data: blob,
+                url: url
+            });
+
+            updateProgress({
+                current: i + 1,
+                total: state.imageFiles.length,
+                stage: 'extracting'
+            });
+        }
+
+        // Sort images using current settings
+        const filenames = images.map(img => img.filename);
+        const sortedFilenames = sortImages(
+            filenames,
+            state.settings.useNaturalSort,
+            state.settings.priorityChars
+        );
+
+        // Reorder images based on sorted filenames
+        const sortedImages = sortedFilenames.map(filename =>
+            images.find(img => img.filename === filename)
+        );
+
+        // Convert to PDF
+        const outputFilename = 'converted_images.pdf';
+        await convertImagesToPDF(sortedImages, outputFilename, updateProgress);
+
+        showProgressModal(false);
+        showNotification(
+            'success',
+            'Conversion Complete',
+            `Successfully converted ${images.length} image(s) to PDF!\\nFile: ${outputFilename}`
+        );
+
+        // Clear all image files after successful conversion
+        state.imageFiles.forEach(({ fileId }) => removeFile(fileId));
+
+    } catch (error) {
+        showProgressModal(false);
+        showNotification('error', 'Error Occurred', error.message);
+        console.error('Batch conversion error:', error);
+    }
+}
+
+/**
+ * Convert all ZIP files individually (each ZIP to its own PDF)
+ */
+async function convertAllZipsIndividually() {
+    const zipFiles = Array.from(state.files.entries())
+        .filter(([_, fileData]) => fileData.type === 'zip')
+        .map(([fileId, fileData]) => ({ fileId, fileData }));
+
+    if (zipFiles.length === 0) {
+        showNotification('warning', 'No ZIP Files', 'No ZIP files to convert.');
+        return;
+    }
+
+    try {
+        showProgressModal(true);
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < zipFiles.length; i++) {
+            const { fileId, fileData } = zipFiles[i];
+
+            try {
+                updateProgress({
+                    current: i + 1,
+                    total: zipFiles.length,
+                    stage: 'extracting'
+                });
+
+                // Extract images from ZIP
+                const images = await extractImagesFromZip(fileData.file, (progress) => {
+                    // Update with file-specific progress
+                    updateProgress({
+                        current: i + 1,
+                        total: zipFiles.length,
+                        stage: progress.stage
+                    });
+                });
+
+                if (images.length === 0) {
+                    failCount++;
+                    continue;
+                }
+
+                // Convert to PDF
+                const outputFilename = fileData.file.name.replace(/\.zip$/i, '.pdf');
+                await convertImagesToPDF(images, outputFilename, (progress) => {
+                    updateProgress({
+                        current: i + 1,
+                        total: zipFiles.length,
+                        stage: progress.stage
+                    });
+                });
+
+                successCount++;
+                // Remove the processed file
+                removeFile(fileId);
+
+            } catch (error) {
+                console.error(`Error processing ${fileData.file.name}:`, error);
+                failCount++;
+            }
+        }
+
+        showProgressModal(false);
+
+        if (successCount > 0) {
+            showNotification(
+                failCount === 0 ? 'success' : 'warning',
+                'Batch Conversion Complete',
+                `Successfully converted ${successCount} ZIP file(s) to PDF.${failCount > 0 ? `\n${failCount} file(s) failed.` : ''}`
+            );
+        } else {
+            showNotification('error', 'Conversion Failed', 'All conversions failed.');
+        }
+
+    } catch (error) {
+        showProgressModal(false);
+        showNotification('error', 'Error Occurred', error.message);
+        console.error('Batch conversion error:', error);
+    }
+}
+
+/**
+ * Convert all ZIP files to a single merged PDF
+ */
+async function convertAllZipsToSinglePDF() {
+    const zipFiles = Array.from(state.files.entries())
+        .filter(([_, fileData]) => fileData.type === 'zip')
+        .map(([fileId, fileData]) => ({ fileId, fileData }));
+
+    if (zipFiles.length === 0) {
+        showNotification('warning', 'No ZIP Files', 'No ZIP files to convert.');
+        return;
+    }
+
+    try {
+        showProgressModal(true);
+
+        // Extract images from all ZIPs
+        const allImages = [];
+        for (let i = 0; i < zipFiles.length; i++) {
+            const { fileData } = zipFiles[i];
+
+            updateProgress({
+                current: i + 1,
+                total: zipFiles.length,
+                stage: 'extracting'
+            });
+
+            const images = await extractImagesFromZip(fileData.file, () => { });
+
+            if (images.length > 0) {
+                allImages.push(...images);
+            }
+        }
+
+        if (allImages.length === 0) {
+            throw new Error('No images found in any ZIP file.');
+        }
+
+        // Sort all images together using current settings
+        const filenames = allImages.map(img => img.filename);
+        const sortedFilenames = sortImages(
+            filenames,
+            state.settings.useNaturalSort,
+            state.settings.priorityChars
+        );
+
+        // Reorder images based on sorted filenames
+        const sortedImages = sortedFilenames.map(filename =>
+            allImages.find(img => img.filename === filename)
+        );
+
+        // Convert to PDF
+        const outputFilename = 'merged_archives.pdf';
+        await convertImagesToPDF(sortedImages, outputFilename, updateProgress);
+
+        showProgressModal(false);
+        showNotification(
+            'success',
+            'Merge Complete',
+            `Successfully merged ${zipFiles.length} ZIP file(s) into one PDF!\nFile: ${outputFilename}\nTotal pages: ${allImages.length}`
+        );
+
+        // Clear all ZIP files after successful conversion
+        zipFiles.forEach(({ fileId }) => removeFile(fileId));
+
+    } catch (error) {
+        showProgressModal(false);
+        showNotification('error', 'Error Occurred', error.message);
+        console.error('Merge conversion error:', error);
+    }
+}
+
+/**
  * Add a file to the list
  */
-function addFile(file) {
+function addFile(file, type = 'zip') {
     const fileId = state.currentFileId++;
     state.files.set(fileId, {
         file,
+        type,
         status: 'pending'
     });
+
+    // If it's an image file, add to imageFiles array
+    if (type === 'image') {
+        state.imageFiles.push({ fileId, file });
+    }
 
     renderFileList();
 }
@@ -409,6 +639,16 @@ function addFile(file) {
  * Remove a file from the list
  */
 function removeFile(fileId) {
+    const fileData = state.files.get(fileId);
+
+    // Remove from imageFiles array if it's an image
+    if (fileData?.type === 'image') {
+        const index = state.imageFiles.findIndex(f => f.fileId === fileId);
+        if (index !== -1) {
+            state.imageFiles.splice(index, 1);
+        }
+    }
+
     state.files.delete(fileId);
     renderFileList();
 }
@@ -418,14 +658,56 @@ function removeFile(fileId) {
  */
 function renderFileList() {
     const fileList = document.getElementById('fileList');
+    const convertAllSection = document.getElementById('convertAllSection');
+    const buttonGroup = document.getElementById('convertButtonGroup');
 
     if (state.files.size === 0) {
         fileList.innerHTML = '';
+        convertAllSection.style.display = 'none';
         return;
     }
 
+    // Count file types
+    const zipCount = Array.from(state.files.values()).filter(f => f.type === 'zip').length;
+    const imageCount = state.imageFiles.length;
+
+    // Determine which buttons to show
+    let buttonsHTML = '';
+
+    if (zipCount > 1) {
+        // Multiple ZIP files - show both ZIP options
+        buttonsHTML += `
+            <button class="btn btn-primary btn-convert-all" onclick="convertAllZipsIndividually()">
+                Convert Each to PDF
+            </button>
+            <button class="btn btn-primary btn-convert-all" onclick="convertAllZipsToSinglePDF()">
+                Merge All to PDF
+            </button>
+        `;
+    }
+
+    if (imageCount > 1) {
+        // Multiple image files - show image convert all option
+        buttonsHTML += `
+            <button class="btn btn-primary btn-convert-all" onclick="convertAllToPDF()">
+                Convert Images to PDF
+            </button>
+        `;
+    }
+
+    // Show/hide convert all section
+    if (buttonsHTML) {
+        buttonGroup.innerHTML = buttonsHTML;
+        convertAllSection.style.display = 'block';
+    } else {
+        convertAllSection.style.display = 'none';
+    }
+
+    // Render file list
     let html = '';
     state.files.forEach((fileData, fileId) => {
+        const isZip = fileData.type === 'zip';
+
         html += `
             <div class="file-item" data-file-id="${fileId}">
                 <div class="file-info">
@@ -433,7 +715,7 @@ function renderFileList() {
                     <div class="file-size">${formatFileSize(fileData.file.size)}</div>
                 </div>
                 <div class="file-actions">
-                    <button class="btn btn-convert" onclick="convertZipToPDF(${fileId})">Convert to PDF</button>
+                    ${isZip ? `<button class="btn btn-convert" onclick="convertZipToPDF(${fileId})">Convert to PDF</button>` : ''}
                     <button class="btn btn-remove" onclick="removeFile(${fileId})">Remove</button>
                 </div>
             </div>
@@ -448,12 +730,15 @@ function renderFileList() {
  */
 function handleFiles(files) {
     for (const file of files) {
-        // Check if file is a ZIP file
-        if (!(file.type === 'application/zip' || file.name.toLowerCase().endsWith('.zip'))) {
+        const isZipFile = file.type === 'application/zip' || file.name.toLowerCase().endsWith('.zip');
+        const isImageFile = isSupportedWebFormat(file.name);
+
+        // Check if file is valid type (ZIP or supported image)
+        if (!isZipFile && !isImageFile) {
             showNotification(
                 'warning',
                 'Invalid File Type',
-                `${file.name} is not a ZIP file.`
+                `${file.name} is not a supported file type.\nSupported: ZIP, JPG, JPEG, PNG, GIF, WebP`
             );
             continue;
         }
@@ -468,7 +753,9 @@ function handleFiles(files) {
             continue;
         }
 
-        addFile(file);
+        // Add file with appropriate type
+        const fileType = isZipFile ? 'zip' : 'image';
+        addFile(file, fileType);
     }
 }
 
@@ -623,4 +910,7 @@ if (document.readyState === 'loading') {
 
 // Make functions globally accessible for inline event handlers
 window.convertZipToPDF = convertZipToPDF;
+window.convertAllToPDF = convertAllToPDF;
+window.convertAllZipsIndividually = convertAllZipsIndividually;
+window.convertAllZipsToSinglePDF = convertAllZipsToSinglePDF;
 window.removeFile = removeFile;
