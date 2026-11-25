@@ -9,6 +9,11 @@
  * - sortImages()
  * - IMAGE_EXTENSIONS
  * - DEFAULT_PRIORITY_CHARS
+ *
+ * ZIP recovery comes from ./zip-salvage.js:
+ * - loadZipWithRecovery()
+ * - readVerifiedFile()
+ * - formatSkippedNames()
  */
 
 // LocalStorage key for settings
@@ -101,8 +106,15 @@ function hideNotification() {
  * @throws {Error} If security limits are exceeded
  */
 async function extractImagesFromZip(zipFile, progressCallback) {
-    const zip = new JSZip();
-    const zipData = await zip.loadAsync(zipFile);
+    const { zip: zipData, recovered, skipped, lostCount, expectedCrc } =
+        await loadZipWithRecovery(JSZip, zipFile);
+    // Images lost by the salvage (only those the first pass below would have kept)
+    const damagedImages = skipped.filter(name => isImageFile(name) && isSupportedWebFormat(name));
+    const noImagesRecoveredError = () => new Error(
+        `${zipFile.name} is damaged and none of its images could be recovered` +
+        (damagedImages.length > 0 ? ` (${formatSkippedNames(damagedImages)})` : '') +
+        '. Please download it again or re-create the ZIP file.'
+    );
 
     const imageFiles = [];
     const fileList = Object.keys(zipData.files);
@@ -157,6 +169,9 @@ async function extractImagesFromZip(zipFile, progressCallback) {
     }
 
     if (imageFiles.length === 0) {
+        if (recovered && (damagedImages.length > 0 || lostCount > 0)) {
+            throw noImagesRecoveredError();
+        }
         throw new Error('No image files found in ZIP archive.');
     }
 
@@ -171,7 +186,14 @@ async function extractImagesFromZip(zipFile, progressCallback) {
     const images = [];
     for (let i = 0; i < sortedImages.length; i++) {
         const filename = sortedImages[i];
-        const imageData = await zipData.file(filename).async('blob');
+        const imageData = recovered
+            ? await readVerifiedFile(zipData, filename, expectedCrc).then(b => b && new Blob([b]))
+            : await zipData.file(filename).async('blob');
+
+        if (!imageData) {
+            damagedImages.push(filename);
+            continue;
+        }
 
         images.push({
             filename,
@@ -186,6 +208,22 @@ async function extractImagesFromZip(zipFile, progressCallback) {
                 stage: 'extracting'
             });
         }
+    }
+
+    if (recovered) {
+        if (images.length === 0) {
+            throw noImagesRecoveredError();
+        }
+        const problems = [];
+        if (damagedImages.length > 0) {
+            problems.push(`Skipped ${damagedImages.length} image(s): ${formatSkippedNames(damagedImages)}`);
+        }
+        if (lostCount > 0) {
+            problems.push(`${lostCount} file(s) could not be found and may be missing`);
+        }
+        images.recoveryWarning = problems.length > 0
+            ? `${zipFile.name} is damaged. ${problems.join('. ')}`
+            : `${zipFile.name} was damaged and has been repaired.`;
     }
 
     return images;
@@ -378,9 +416,10 @@ async function convertZipToPDF(fileId) {
 
         showProgressModal(false);
         showNotification(
-            'success',
+            images.recoveryWarning ? 'warning' : 'success',
             'Conversion Complete',
-            `Successfully converted!\nFile: ${outputFilename}\nPages: ${images.length}`
+            `Successfully converted!\nFile: ${outputFilename}\nPages: ${images.length}` +
+            (images.recoveryWarning ? `\n\n${images.recoveryWarning}` : '')
         );
 
         // Remove file from list after successful conversion
@@ -478,6 +517,8 @@ async function convertAllZipsIndividually() {
         showProgressModal(true);
         let successCount = 0;
         let failCount = 0;
+        const recoveryWarnings = [];
+        const failures = [];
 
         for (let i = 0; i < zipFiles.length; i++) {
             const { fileId, fileData } = zipFiles[i];
@@ -501,7 +542,12 @@ async function convertAllZipsIndividually() {
 
                 if (images.length === 0) {
                     failCount++;
+                    failures.push(`${fileData.file.name}: No images found.`);
                     continue;
+                }
+
+                if (images.recoveryWarning) {
+                    recoveryWarnings.push(images.recoveryWarning);
                 }
 
                 // Convert to PDF
@@ -526,19 +572,27 @@ async function convertAllZipsIndividually() {
             } catch (error) {
                 console.error(`Error processing ${fileData.file.name}:`, error);
                 failCount++;
+                failures.push(`${fileData.file.name}: ${error.message}`);
             }
         }
 
         showProgressModal(false);
+        const maxFailuresShown = 5;
+        const failureDetails = failures.length > 0
+            ? `\n\n${failures.slice(0, maxFailuresShown).join('\n')}` +
+              (failures.length > maxFailuresShown ? `\n...and ${failures.length - maxFailuresShown} more` : '')
+            : '';
 
         if (successCount > 0) {
             showNotification(
-                failCount === 0 ? 'success' : 'warning',
+                failCount === 0 && recoveryWarnings.length === 0 ? 'success' : 'warning',
                 'Batch Conversion Complete',
-                `Successfully converted ${successCount} ZIP file(s) to PDF.${failCount > 0 ? `\n${failCount} file(s) failed.` : ''}`
+                `Successfully converted ${successCount} ZIP file(s) to PDF.${failCount > 0 ? `\n${failCount} file(s) failed.` : ''}` +
+                (recoveryWarnings.length > 0 ? `\n\n${recoveryWarnings.join('\n')}` : '') +
+                failureDetails
             );
         } else {
-            showNotification('error', 'Conversion Failed', 'All conversions failed.');
+            showNotification('error', 'Conversion Failed', `All conversions failed.${failureDetails}`);
         }
 
     } catch (error) {
@@ -580,6 +634,7 @@ async function convertAllZipsToSinglePDF() {
         // Extract images from all ZIPs in sorted order
         // Each ZIP's images are already sorted internally by extractImagesFromZip
         const allImages = [];
+        const recoveryWarnings = [];
         for (let i = 0; i < sortedZipFiles.length; i++) {
             const { fileData } = sortedZipFiles[i];
 
@@ -589,7 +644,15 @@ async function convertAllZipsToSinglePDF() {
                 stage: 'extracting'
             });
 
-            const images = await extractImagesFromZip(fileData.file, () => { });
+            let images;
+            try {
+                images = await extractImagesFromZip(fileData.file, () => { });
+            } catch (error) {
+                throw new Error(`${fileData.file.name}: ${error.message}`, { cause: error });
+            }
+            if (images.recoveryWarning) {
+                recoveryWarnings.push(images.recoveryWarning);
+            }
 
             // Images from extractImagesFromZip are already sorted
             // Add them in order to maintain ZIP file sequence
@@ -607,9 +670,10 @@ async function convertAllZipsToSinglePDF() {
 
         showProgressModal(false);
         showNotification(
-            'success',
+            recoveryWarnings.length > 0 ? 'warning' : 'success',
             'Merge Complete',
-            `Successfully merged ${zipFiles.length} ZIP file(s) into one PDF!\nFile: ${outputFilename} \nTotal pages: ${allImages.length} `
+            `Successfully merged ${zipFiles.length} ZIP file(s) into one PDF!\nFile: ${outputFilename} \nTotal pages: ${allImages.length} ` +
+            (recoveryWarnings.length > 0 ? `\n\n${recoveryWarnings.join('\n')}` : '')
         );
 
         // Clear all ZIP files after successful conversion
